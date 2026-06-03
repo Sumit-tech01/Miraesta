@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 
-export default function BestSellers({ products, title = 'BEST SELLERS', onProductClick }) {
+export default function BestSellers({ products, title = 'BEST SELLERS' }) {
   const scrollRef = useRef(null);
   const [canScrollRight, setCanScrollRight] = useState(true);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -69,11 +70,10 @@ export default function BestSellers({ products, title = 'BEST SELLERS', onProduc
           className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
         >
           {products.map((product) => (
-            <a
-              href="#"
-              key={product.id}
+            <Link
+              to={`/product/${product._id || product.id}`}
+              key={product.id || product._id}
               className="w-full text-center group"
-              onClick={(e) => { e.preventDefault(); onProductClick?.(product); }}
             >
               {/* Product Image — white bg like Revolve */}
               <div className="relative bg-[#f5f5f5] aspect-[3/4] overflow-hidden mb-2">
@@ -108,7 +108,7 @@ export default function BestSellers({ products, title = 'BEST SELLERS', onProduc
               <p className="text-[12px] text-black">
                 ₹{product.price.toLocaleString()}
               </p>
-            </a>
+            </Link>
           ))}
         </div>
       </div>

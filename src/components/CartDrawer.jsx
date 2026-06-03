@@ -1,112 +1,84 @@
-import { useState } from 'react';
-import { useCart } from '../context/CartContext';
-import Checkout from './Checkout';
-import { useAuth } from '../context/AuthContext';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-export default function CartDrawer() {
-  const { items, isOpen, setIsOpen, removeItem, updateQty, totalItems, totalPrice } = useCart();
-  const [showCheckout, setShowCheckout] = useState(false);
-  const { user } = useAuth();
+export default function CartDrawer({ isOpen, onClose }) {
+  const [cartItems, setCartItems] = useState([]);
+  const navigate = useNavigate();
+
+  // Function to pull the latest cart from local storage
+  const loadCart = () => {
+    const items = JSON.parse(localStorage.getItem('miraesta_cart') || '[]');
+    setCartItems(items);
+  };
+
+  useEffect(() => {
+    loadCart(); // Load on mount
+    
+    // Listen for the custom event we dispatch from ProductDetail.jsx
+    window.addEventListener('cartUpdated', loadCart);
+    
+    return () => {
+      window.removeEventListener('cartUpdated', loadCart);
+    };
+  }, []);
+
+  const handleRemove = (id, size) => {
+    const updatedCart = cartItems.filter(item => !(item.id === id && item.size === size));
+    localStorage.setItem('miraesta_cart', JSON.stringify(updatedCart));
+    setCartItems(updatedCart);
+    window.dispatchEvent(new Event('cartUpdated')); // Tell the rest of the app
+  };
+
+  const handleCheckout = () => {
+    onClose();
+    navigate('/login'); // Forces unauthenticated users to our new Auth page
+  };
+
+  const total = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+  if (!isOpen) return null;
 
   return (
-    <>
-      {/* Overlay */}
-      <div
-        className={`fixed inset-0 z-50 bg-black/40 transition-opacity duration-300 ${
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-        onClick={() => setIsOpen(false)}
-      />
-
+    <div className="fixed inset-0 z-50 flex justify-end font-sans text-black">
+      {/* Dark Overlay */}
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
+      
       {/* Drawer Panel */}
-      <div
-        className={`fixed top-0 right-0 h-full w-full sm:w-[400px] max-w-[100vw] sm:max-w-[90vw] bg-white z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
-          isOpen ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
+      <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-slide-in-right">
+        
         {/* Header */}
-        <div className="flex items-center justify-between px-5 h-[56px] border-b border-[#e5e5e5] flex-shrink-0">
-          <h2 className="text-[14px] font-bold tracking-[0.06em] uppercase">
-            Your Bag ({totalItems})
-          </h2>
-          <button
-            onClick={() => setIsOpen(false)}
-            className="w-8 h-8 flex items-center justify-center hover:bg-[#f5f5f5] rounded-full transition-colors"
-            aria-label="Close cart"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+        <div className="flex justify-between items-center p-6 border-b-[1px] border-solid border-gray-200">
+          <h2 className="text-sm font-bold tracking-[0.15em] uppercase">Your Bag ({cartItems.length})</h2>
+          <button onClick={onClose} className="text-xl hover:text-gray-500 transition-colors">✕</button>
         </div>
-
-        {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto">
-          {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center px-8">
-              <svg className="w-12 h-12 text-[#ccc] mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5V6a3.75 3.75 0 10-7.5 0v4.5m11.356-1.993l1.263 12c.07.665-.45 1.243-1.119 1.243H4.25a1.125 1.125 0 01-1.12-1.243l1.264-12A1.125 1.125 0 015.513 7.5h12.974c.576 0 1.059.435 1.119 1.007zM8.625 10.5a.375.375 0 11-.75 0 .375.375 0 01.75 0zm7.5 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-              </svg>
-              <p className="text-[13px] text-[#666] mb-1">Your bag is empty</p>
-              <p className="text-[11px] text-[#999]">Add items to get started</p>
+        
+        {/* Cart Items List */}
+        <div className="flex-grow overflow-y-auto p-6">
+          {cartItems.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 space-y-4">
+              <svg className="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+              <p className="text-xs uppercase tracking-widest">Your bag is empty</p>
             </div>
           ) : (
-            <div className="p-5 space-y-4">
-              {items.map((item) => (
-                <div key={item.id} className="flex gap-4 pb-4 border-b border-[#f0f0f0]">
-                  {/* Product Image */}
-                  <div className="w-[90px] h-[120px] flex-shrink-0 bg-[#f5f5f5] overflow-hidden">
-                    <img
-                      src={item.image}
-                      alt={item.name}
-                      className="w-full h-full object-cover object-top"
-                    />
+            <div className="space-y-8">
+              {cartItems.map((item, idx) => (
+                <div key={idx} className="flex gap-6">
+                  <div className="w-24 h-32 bg-gray-50 flex-shrink-0">
+                    <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
                   </div>
-
-                  {/* Product Details */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-[11px] text-[#999] uppercase tracking-[0.04em]">
-                          {item.brand}
-                        </p>
-                        <p className="text-[12px] text-black font-medium leading-tight mt-0.5 truncate">
-                          {item.name}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => removeItem(item.id)}
-                        className="flex-shrink-0 text-[#999] hover:text-black transition-colors"
-                        aria-label="Remove item"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
+                  <div className="flex flex-col flex-grow pt-2">
+                    <div className="flex justify-between items-start">
+                      <h3 className="text-xs font-bold uppercase tracking-widest leading-relaxed pr-4">{item.name}</h3>
+                      <p className="text-xs tracking-wider font-medium whitespace-nowrap">₹ {item.price}</p>
                     </div>
-
-                    <p className="text-[12px] text-black mt-2">
-                      ₹{item.price.toLocaleString()}
-                    </p>
-
-                    {/* Quantity Selector */}
-                    <div className="flex items-center gap-0 mt-3 border border-[#e5e5e5] inline-flex">
-                      <button
-                        onClick={() => updateQty(item.id, item.qty - 1)}
-                        className="w-7 h-7 flex items-center justify-center text-[13px] hover:bg-[#f5f5f5] transition-colors"
-                      >
-                        −
-                      </button>
-                      <span className="w-8 h-7 flex items-center justify-center text-[12px] border-x border-[#e5e5e5]">
-                        {item.qty}
-                      </span>
-                      <button
-                        onClick={() => updateQty(item.id, item.qty + 1)}
-                        className="w-7 h-7 flex items-center justify-center text-[13px] hover:bg-[#f5f5f5] transition-colors"
-                      >
-                        +
-                      </button>
-                    </div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-2">Size: {item.size}</p>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1">Qty: {item.quantity}</p>
+                    <button 
+                      onClick={() => handleRemove(item.id, item.size)}
+                      className="text-[10px] uppercase tracking-widest text-gray-400 underline underline-offset-4 hover:text-red-500 transition-colors mt-auto w-max"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
               ))}
@@ -114,47 +86,23 @@ export default function CartDrawer() {
           )}
         </div>
 
-        {/* Footer — Subtotal + Checkout */}
-        {items.length > 0 && (
-          <div className="border-t border-[#e5e5e5] p-5 flex-shrink-0">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[12px] text-[#666]">Subtotal</span>
-              <span className="text-[14px] font-semibold text-black">
-                ₹{totalPrice.toLocaleString()}
-              </span>
+        {/* Footer & Checkout */}
+        {cartItems.length > 0 && (
+          <div className="p-6 border-t-[1px] border-solid border-gray-200 bg-gray-50">
+            <div className="flex justify-between items-center mb-6">
+              <span className="text-xs font-bold uppercase tracking-widest">Subtotal</span>
+              <span className="text-sm font-bold tracking-wider">₹ {total}</span>
             </div>
-            <p className="text-[10px] text-[#999] mb-4">
-              Shipping and taxes calculated at checkout
-            </p>
-            <button
-              onClick={() => {
-                if (!user) {
-                  alert('Please sign in to checkout');
-                  return;
-                }
-                setIsOpen(false);
-                setShowCheckout(true);
-              }}
-              className="w-full h-[44px] bg-black text-white text-[12px] font-bold tracking-[0.06em] uppercase hover:bg-[#333] transition-colors"
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-6">Shipping and taxes calculated at checkout.</p>
+            <button 
+              onClick={handleCheckout}
+              className="w-full py-4 text-xs font-bold tracking-[0.2em] uppercase bg-black text-white hover:bg-gray-900 transition-colors"
             >
               Checkout
-            </button>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="w-full h-[44px] mt-2 border border-[#e5e5e5] text-black text-[12px] font-bold tracking-[0.06em] uppercase hover:bg-[#f5f5f5] transition-colors"
-            >
-              Continue Shopping
             </button>
           </div>
         )}
       </div>
-
-      {showCheckout && (
-        <Checkout
-          onClose={() => setShowCheckout(false)}
-          onSuccess={() => setShowCheckout(false)}
-        />
-      )}
-    </>
+    </div>
   );
 }

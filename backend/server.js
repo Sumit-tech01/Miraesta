@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
@@ -30,11 +31,6 @@ app.use(express.json());
 // Connect to MongoDB
 connectDB();
 
-// Routes
-app.get('/', (req, res) => {
-  res.json({ message: 'Miraesta API is running' });
-});
-
 // Import routes
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -51,6 +47,14 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payment', require('./routes/payment'));
 app.use('/api/admin', adminRoutes);
+
+// 1. Serve static files from the frontend build
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// 2. Catch-all route for React Router (SPA)
+app.get(/.*/, (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
