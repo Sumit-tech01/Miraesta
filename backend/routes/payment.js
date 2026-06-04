@@ -3,7 +3,9 @@ const router = express.Router();
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const Order = require('../models/Order');
+const Product = require('../models/Product');
 const { auth } = require('../middleware/auth');
+const mongoose = require('mongoose');
 
 // Initialize Razorpay only if valid keys are provided
 const getRazorpay = () => {
@@ -20,35 +22,100 @@ const getRazorpay = () => {
   });
 };
 
+const validateShippingAddress = (shippingAddress = {}) => {
+  const required = ['name', 'phone', 'addressLine1', 'city', 'state', 'postalCode'];
+  const missing = required.filter((field) => !shippingAddress[field]);
+
+  if (missing.length > 0) {
+    throw new Error(`Missing shipping address fields: ${missing.join(', ')}`);
+  }
+
+  if (!/^\d{10}$/.test(String(shippingAddress.phone))) {
+    throw new Error('Phone must be a 10-digit number');
+  }
+};
+
+const buildOrderItems = async (items) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('Cart is empty');
+  }
+
+  const requested = items.map((item) => ({
+    productId: item.productId || item.id,
+    quantity: Number(item.quantity || item.qty),
+    size: item.size || 'M'
+  }));
+
+  for (const item of requested) {
+    if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+      throw new Error('Invalid product in cart');
+    }
+
+    if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10) {
+      throw new Error('Invalid item quantity');
+    }
+  }
+
+  const products = await Product.find({
+    _id: { $in: requested.map((item) => item.productId) },
+    inStock: true
+  });
+  const productsById = new Map(products.map((product) => [product._id.toString(), product]));
+
+  let totalAmount = 0;
+  const orderItems = requested.map((item) => {
+    const product = productsById.get(item.productId.toString());
+    if (!product) {
+      throw new Error('One or more products are unavailable');
+    }
+
+    totalAmount += product.price * item.quantity;
+
+    return {
+      productId: product._id,
+      name: product.name,
+      brand: product.brand,
+      image: product.image,
+      price: product.price,
+      quantity: item.quantity,
+      size: item.size
+    };
+  });
+
+  return { orderItems, totalAmount };
+};
+
 // POST /api/payment/create-order
-// Creates a Razorpay order and a pending DB order
+// Creates a Razorpay order and a pending DB order.
 router.post('/create-order', auth, async (req, res) => {
   try {
-    let razorpay;
-    try {
-      razorpay = getRazorpay();
-    } catch (err) {
-      return res.status(400).json({ message: err.message });
-    }
-    
-    const { items, shippingAddress, totalAmount } = req.body;
+    const { items, shippingAddress } = req.body;
+    validateShippingAddress(shippingAddress);
+    const { orderItems, totalAmount } = await buildOrderItems(items);
+    const isTestMode = process.env.RAZORPAY_KEY_ID === 'rzp_test_placeholder';
 
-    if (!items || items.length === 0) {
-      return res.status(400).json({ message: 'Cart is empty' });
-    }
-
-    // Create Razorpay order (amount in paise)
-    const razorpayOrder = await razorpay.orders.create({
+    let razorpayOrder = {
+      id: `test_order_${Date.now()}`,
       amount: Math.round(totalAmount * 100),
-      currency: 'INR',
-      receipt: `receipt_${Date.now()}`,
-      notes: { userId: req.user.userId.toString() }
-    });
+      currency: 'INR'
+    };
+
+    if (!isTestMode) {
+      const razorpay = getRazorpay();
+
+      // Create Razorpay order (amount in paise)
+      razorpayOrder = await razorpay.orders.create({
+        amount: Math.round(totalAmount * 100),
+        currency: 'INR',
+        receipt: `receipt_${Date.now()}`,
+        notes: { userId: req.user.userId.toString() }
+      });
+    }
 
     // Save pending order to MongoDB
     const order = new Order({
       userId: req.user.userId,
-      items,
+      items: orderItems,
       shippingAddress,
       totalAmount,
       status: 'pending',
@@ -68,7 +135,7 @@ router.post('/create-order', auth, async (req, res) => {
 
   } catch (error) {
     console.error('Create order error:', error);
-    res.status(500).json({ message: 'Failed to create order', error: error.message });
+    res.status(400).json({ message: 'Failed to create order', error: error.message });
   }
 });
 
@@ -89,15 +156,17 @@ router.post('/verify', auth, async (req, res) => {
         .digest('hex');
 
       if (expectedSignature !== razorpay_signature) {
-        await Order.findByIdAndUpdate(orderId, { paymentStatus: 'failed' });
+        await Order.findOneAndUpdate(
+          { _id: orderId, userId: req.user.userId },
+          { paymentStatus: 'failed' }
+        );
         return res.status(400).json({ message: 'Payment verification failed' });
       }
     }
 
 
-    // Update order as paid
-    const order = await Order.findByIdAndUpdate(
-      orderId,
+    const order = await Order.findOneAndUpdate(
+      { _id: orderId, userId: req.user.userId },
       {
         paymentStatus: 'paid',
         status: 'processing',
@@ -106,6 +175,10 @@ router.post('/verify', auth, async (req, res) => {
       },
       { new: true }
     );
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
 
     res.json({ message: 'Payment verified', order });
 
@@ -120,7 +193,10 @@ router.post('/verify', auth, async (req, res) => {
 router.post('/failed', auth, async (req, res) => {
   try {
     const { orderId } = req.body;
-    await Order.findByIdAndUpdate(orderId, { paymentStatus: 'failed', status: 'cancelled' });
+    await Order.findOneAndUpdate(
+      { _id: orderId, userId: req.user.userId },
+      { paymentStatus: 'failed', status: 'cancelled' }
+    );
     res.json({ message: 'Order marked as failed' });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -141,4 +217,3 @@ router.post('/test-create-order', async (req, res) => {
 });
 
 module.exports = router;
-
