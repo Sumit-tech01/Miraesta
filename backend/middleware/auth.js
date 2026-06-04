@@ -1,5 +1,4 @@
 const jwt = require('jsonwebtoken');
-const { getJwtSecret } = require('../config/env');
 
 const auth = (req, res, next) => {
   try {
@@ -9,7 +8,7 @@ const auth = (req, res, next) => {
       return res.status(401).json({ message: 'No token provided' });
     }
     
-    const decoded = jwt.verify(token, getJwtSecret());
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
     req.user = decoded;
     next();
   } catch (error) {
@@ -25,7 +24,7 @@ const adminAuth = (req, res, next) => {
       return res.status(401).json({ message: 'No token provided' });
     }
     
-    const decoded = jwt.verify(token, getJwtSecret());
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
     
     if (decoded.role !== 'admin') {
       return res.status(403).json({ message: 'Admin access required' });
