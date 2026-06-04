@@ -1,11 +1,12 @@
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const path = require('path');
+const { loadEnv, validateEnv } = require('./config/env');
 
 // Load environment variables
-dotenv.config();
+loadEnv();
+validateEnv();
 
 // Initialize app
 const app = express();
@@ -28,9 +29,6 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Connect to MongoDB
-connectDB();
-
 // Import routes
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -40,6 +38,9 @@ const orderRoutes = require('./routes/orders');
 const adminRoutes = require('./routes/admin');
 
 // Use routes
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', service: 'miraesta-backend' });
+});
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
@@ -63,6 +64,15 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+
+const startServer = async () => {
+  await connectDB();
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+};
+
+startServer().catch((error) => {
+  console.error('Failed to start server:', error.message);
+  process.exit(1);
 });
